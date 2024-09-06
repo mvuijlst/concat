@@ -1,7 +1,6 @@
 import os
 import subprocess
 import sys
-from tqdm import tqdm
 
 def get_file_size(file):
     return os.path.getsize(file)
@@ -23,14 +22,26 @@ def concatenate_videos(input_files, output_file):
 
     command = [
         'ffmpeg', '-f', 'concat', '-safe', '0', '-i', 'inputs.txt',
-        '-c', 'copy', output_file
+        '-c', 'copy', '-hide_banner', output_file
     ]
     
-    # Run the ffmpeg command with progress bar
+    # Run the ffmpeg command and capture progress
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    for line in process.stderr:
-        print(line.strip())
     
+    max_line_length = 0
+    while True:
+        line = process.stderr.readline()
+        if not line:
+            break
+
+        if "frame=" in line or "size=" in line or "time=" in line or "bitrate=" in line or "speed=" in line:
+            # Remove newline and pad the line with spaces to avoid text overlap from shorter lines
+            line = line.strip()
+            max_line_length = max(max_line_length, len(line))
+            padded_line = line.ljust(max_line_length)
+            sys.stdout.write(f"\r{padded_line}")
+            sys.stdout.flush()
+
     os.remove('inputs.txt')  # Clean up temporary file
 
 def process_folder(folder_path, partial_filename):
@@ -41,15 +52,29 @@ def process_folder(folder_path, partial_filename):
         print(f"No matching files found for {partial_filename}")
         return
 
+    # Define output file
+    output_file = os.path.join(folder_path, f"{partial_filename}.mp4")
+
+    # If the output file exists, warn the user and remove it from the list of files to concatenate
+    if os.path.exists(output_file):
+        overwrite_confirm = input(f"\nWarning: {output_file} already exists. Do you want to overwrite it? (y/n): ").lower()
+        if overwrite_confirm != 'y':
+            print("Concatenation aborted.")
+            return
+        
+        # Remove the output file from the matching files to avoid self-concatenation
+        matching_files = [file for file in matching_files if file != output_file]
+
+        # Delete the existing output file before proceeding with concatenation
+        print(f"\nDeleting {output_file}...")
+        os.remove(output_file)
+
     # Display file sizes and ask for confirmation
     total_original_size = display_file_sizes(matching_files)
-    
-    confirm = input(f"\nDo you want to concatenate these files into {partial_filename}.mp4? (y/n): ").lower()
-    if confirm != 'y':
-        print("Concatenation aborted.")
-        return
 
-    output_file = os.path.join(folder_path, f"{partial_filename}.mp4")
+    if not matching_files:
+        print(f"No files left to concatenate.")
+        return
 
     print("\nStarting concatenation...")
     concatenate_videos(matching_files, output_file)
